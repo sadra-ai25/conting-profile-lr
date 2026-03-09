@@ -1,0 +1,70 @@
+services:
+  redis:
+    image: redis:7.0-alpine
+    ports:
+      - "6383:6379"
+    restart: unless-stopped
+    networks:
+      - LR_net
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    ports:
+      - "8558:8554"
+    restart: unless-stopped
+    networks:
+      - LR_net
+
+  rtsp_simulator:
+    image: jrottenberg/ffmpeg:6.1-alpine
+    volumes:
+      - ./datasets/@DSCN0668-reject.MP4:/input/video.mp4
+    command: >
+      -re -stream_loop -1 -i /input/video.mp4
+      -c:v libx264 -b:v 5M -maxrate 5M -bufsize 10M
+      -c:a copy -f rtsp rtsp://mediamtx:8554/mystream
+    depends_on:
+      - mediamtx
+    restart: unless-stopped
+    networks:
+      - LR_net
+
+  LR:
+    image: ocr                
+    # build: .               
+    command:
+      - "uvicorn"
+      - "src.api.endpoint:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8004"                
+    ports:
+      - "8004:8004"            
+    volumes:
+      - ./.env:/app/.env
+      - ./src/ai/weights:/app/src/ai/weights
+      - .:/app
+      - ./src:/app/src
+      - ./outputs:/app/outputs
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - mediamtx
+    # restart: unless-stopped   
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - LR_net
+
+networks:
+  LR_net:
+    driver: bridge
